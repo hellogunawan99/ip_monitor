@@ -1,0 +1,9 @@
+# Abaikan file .env
+.env
+
+# Abaikan folder virtual environment dengan nama "venv"
+web_app/
+
+# Opsional: Abaikan file cache Python
+__pycache__/
+*.pyc
