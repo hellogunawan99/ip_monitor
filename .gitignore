@@ -2,7 +2,7 @@
 .env
 
 # Abaikan folder virtual environment dengan nama "venv"
-web_app/
+venv/
 
 # Opsional: Abaikan file cache Python
 __pycache__/

@@ -9,31 +9,38 @@ import os
 
 app = Flask(__name__)
 
-# Konfigurasi password (gunakan environment variable di produksi)
-# Ganti dengan password yang lebih kuat
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 PASSWORD_HASH = hashlib.sha256(ADMIN_PASSWORD.encode()).hexdigest()
 
-# File untuk menyimpan daftar IP
 IP_FILE = "monitored_ips.json"
-
-# Menyimpan status IP
 ip_status = {}
 
-
 def load_ip_addresses():
-    """Load IP addresses from file"""
-    if os.path.exists(IP_FILE):
-        with open(IP_FILE, 'r') as f:
-            return json.load(f)
-    return ["8.8.8.8", "1.1.1.1"]  # Default IPs
-
+    """Load IP addresses and names from file"""
+    try:
+        if os.path.exists(IP_FILE):
+            with open(IP_FILE, 'r') as f:
+                data = json.load(f)
+                # Check if the loaded data is a list (old format)
+                if isinstance(data, list):
+                    # Convert list to dictionary with default names
+                    return {ip: f"Server {i+1}" for i, ip in enumerate(data)}
+                return data
+    except Exception as e:
+        print(f"Error loading IP addresses: {e}")
+    # Default IPs with names
+    return {
+        "8.8.8.8": "Google DNS",
+        "1.1.1.1": "Cloudflare DNS"
+    }
 
 def save_ip_addresses(ips):
-    """Save IP addresses to file"""
-    with open(IP_FILE, 'w') as f:
-        json.dump(ips, f)
-
+    """Save IP addresses and names to file"""
+    try:
+        with open(IP_FILE, 'w') as f:
+            json.dump(ips, f)
+    except Exception as e:
+        print(f"Error saving IP addresses: {e}")
 
 # Load initial IP addresses
 ip_addresses = load_ip_addresses()
@@ -45,6 +52,7 @@ HTML_TEMPLATE = """
     <title>IP Monitoring Dashboard</title>
     <meta charset="UTF-8">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.14.0/Sortable.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -79,12 +87,45 @@ HTML_TEMPLATE = """
             position: fixed;
             height: 100vh;
             overflow-y: auto;
+            transition: transform 0.3s ease;
+            z-index: 1000;
+        }
+
+        /* New sidebar collapsed state */
+        .sidebar.collapsed {
+            transform: translateX(-100%);
+        }
+
+        /* Toggle button styles */
+        .sidebar-toggle {
+            position: fixed;
+            left: var(--sidebar-width);
+            top: 1rem;
+            background: var(--sidebar-bg);
+            color: white;
+            border: none;
+            padding: 0.5rem;
+            cursor: pointer;
+            border-radius: 0 0.375rem 0.375rem 0;
+            transition: left 0.3s ease;
+            z-index: 1000;
+        }
+
+        .sidebar-toggle.collapsed {
+            left: 0;
+        }
+
+        .sidebar-toggle:hover {
+            background: #2d3748;
         }
 
         .sidebar-header {
             padding: 1rem 0;
             border-bottom: 1px solid rgba(255,255,255,0.1);
             margin-bottom: 1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
 
         .sidebar-title {
@@ -98,6 +139,11 @@ HTML_TEMPLATE = """
             flex: 1;
             margin-left: var(--sidebar-width);
             padding: 2rem;
+            transition: margin-left 0.3s ease;
+        }
+
+        .main-content.expanded {
+            margin-left: 0;
         }
 
         /* Form Styles */
@@ -169,12 +215,13 @@ HTML_TEMPLATE = """
             justify-content: space-between;
             align-items: center;
         }
-
-        /* Status Cards Styles */
+        /* Previous styles remain the same until status-container */
+        
         .status-container {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
             gap: 1rem;
+            min-height: 100px;
         }
 
         .status-card {
@@ -182,27 +229,18 @@ HTML_TEMPLATE = """
             border-radius: 0.5rem;
             padding: 1.5rem;
             box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            cursor: move;
+            transition: transform 0.2s, box-shadow 0.2s;
         }
 
         .status-card.online {
             border-left: 4px solid var(--success-color);
+            background: #f0fdf4;  /* Light green background */
         }
 
         .status-card.offline {
             border-left: 4px solid var(--danger-color);
-        }
-
-        .status-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 1rem;
-        }
-
-        .status-title {
-            font-size: 1.125rem;
-            font-weight: 600;
-            color: #1e293b;
+            background: #fef2f2;  /* Light red background */
         }
 
         .status-badge {
@@ -213,55 +251,51 @@ HTML_TEMPLATE = """
         }
 
         .status-badge.online {
-            background: rgba(22, 163, 74, 0.1);
-            color: var(--success-color);
+            background: var(--success-color);
+            color: white;
         }
 
         .status-badge.offline {
-            background: rgba(220, 38, 38, 0.1);
-            color: var(--danger-color);
+            background: var(--danger-color);
+            color: white;
         }
 
-        /* Notification Banner */
-        .notification-banner {
-            position: fixed;
-            top: 1rem;
-            right: 1rem;
-            max-width: 400px;
-            background: white;
-            border-radius: 0.5rem;
-            padding: 1rem;
+        .status-card:hover {
+            transform: translateY(-2px);
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            border-left: 4px solid var(--warning-color);
-            display: none;
-            z-index: 1000;
         }
 
-        .notification-banner.show {
-            display: block;
+        .status-card.sortable-ghost {
+            opacity: 0.4;
         }
 
-        /* Messages */
-        .message {
-            padding: 0.75rem;
-            border-radius: 0.375rem;
+        .status-card.sortable-chosen {
+            background: #f8fafc;
+        }
+
+        /* Add styles for the name input */
+        .ip-name {
+            font-size: 0.875rem;
+            color: #64748b;
+            margin-top: 0.25rem;
+        }
+
+        .form-row {
+            display: flex;
+            gap: 1rem;
             margin-bottom: 1rem;
-            display: none;
         }
 
-        .message-error {
-            background: rgba(220, 38, 38, 0.1);
-            color: var(--danger-color);
-        }
-
-        .message-success {
-            background: rgba(22, 163, 74, 0.1);
-            color: var(--success-color);
+        .form-row .form-control {
+            flex: 1;
         }
     </style>
 </head>
 <body>
     <!-- Sidebar -->
+    <button class="sidebar-toggle" onclick="toggleSidebar()">
+        <i class="fas fa-bars"></i>
+    </button>
     <div class="sidebar">
         <div class="sidebar-header">
             <h2 class="sidebar-title">IP Management</h2>
@@ -273,8 +307,10 @@ HTML_TEMPLATE = """
         </div>
 
         <div class="form-group">
-            <label for="newIp">New IP Address</label>
-            <input type="text" id="newIp" class="form-control" placeholder="e.g., 8.8.8.8">
+            <div class="form-row">
+                <input type="text" id="newIp" class="form-control" placeholder="IP Address (e.g., 8.8.8.8)">
+                <input type="text" id="newName" class="form-control" placeholder="Name (e.g., Google DNS)">
+            </div>
             <button class="btn btn-primary" onclick="addIp()">
                 <i class="fas fa-plus"></i>
                 Add IP
@@ -305,6 +341,33 @@ HTML_TEMPLATE = """
     </div>
 
     <script>
+
+        // Add this new function for sidebar toggle
+        function toggleSidebar() {
+            const sidebar = document.querySelector('.sidebar');
+            const mainContent = document.querySelector('.main-content');
+            const toggleButton = document.querySelector('.sidebar-toggle');
+            
+            sidebar.classList.toggle('collapsed');
+            mainContent.classList.toggle('expanded');
+            toggleButton.classList.toggle('collapsed');
+            
+            // Trigger window resize to adjust Sortable layout
+            window.dispatchEvent(new Event('resize'));
+        }
+
+        // Initialize Sortable
+        let sortable;
+        
+        function initSortable() {
+            const container = document.getElementById('status-container');
+            sortable = Sortable.create(container, {
+                animation: 150,
+                ghostClass: 'sortable-ghost',
+                chosenClass: 'sortable-chosen'
+            });
+        }
+
         function showMessage(type, message) {
             const messageDiv = document.getElementById(`${type}-message`);
             messageDiv.textContent = message;
@@ -317,11 +380,11 @@ HTML_TEMPLATE = """
             const offlineIpsDiv = document.getElementById('offline-ips');
             const offlineIps = [];
             
-            for (const [ip, status] of Object.entries(data)) {
+            for (const [ip, status] of Object.entries(data.status)) {
                 if (!status.online) {
                     offlineIps.push(`
                         <div style="margin-top: 0.5rem; padding: 0.5rem 0; border-top: 1px solid rgba(0,0,0,0.1);">
-                            <strong>${ip}</strong>
+                            <strong>${ip}</strong> - ${data.names[ip]}
                             <div style="color: #64748b; font-size: 0.875rem;">
                                 Last online: ${status.last_online || 'Unknown'}
                                 <br>
@@ -347,25 +410,35 @@ HTML_TEMPLATE = """
                     updateNotificationBanner(data);
                     
                     const container = document.getElementById('status-container');
-                    container.innerHTML = '';
+                    const existingCards = Array.from(container.children);
+                    const newHtml = [];
                     
-                    for (const [ip, status] of Object.entries(data)) {
-                        const card = document.createElement('div');
-                        card.className = `status-card ${status.online ? 'online' : 'offline'}`;
-                        card.innerHTML = `
-                            <div class="status-header">
-                                <span class="status-title">${ip}</span>
-                                <span class="status-badge ${status.online ? 'online' : 'offline'}">
-                                    ${status.online ? 'Online' : 'Offline'}
-                                </span>
+                    for (const [ip, status] of Object.entries(data.status)) {
+                        newHtml.push(`
+                            <div class="status-card ${status.online ? 'online' : 'offline'}" data-ip="${ip}">
+                                <div class="status-header">
+                                    <div>
+                                        <span class="status-title">${ip}</span>
+                                        <div class="ip-name">${data.names[ip]}</div>
+                                    </div>
+                                    <span class="status-badge ${status.online ? 'online' : 'offline'}">
+                                        ${status.online ? 'Online' : 'Offline'}
+                                    </span>
+                                </div>
+                                <div style="color: #64748b;">
+                                    <p><i class="fas fa-clock"></i> Last Check: ${status.last_check}</p>
+                                    <p><i class="fas fa-tachometer-alt"></i> Response Time: ${status.response_time}ms</p>
+                                    ${status.last_online ? `<p><i class="fas fa-history"></i> Last Online: ${status.last_online}</p>` : ''}
+                                </div>
                             </div>
-                            <div style="color: #64748b;">
-                                <p><i class="fas fa-clock"></i> Last Check: ${status.last_check}</p>
-                                <p><i class="fas fa-tachometer-alt"></i> Response Time: ${status.response_time}ms</p>
-                                ${status.last_online ? `<p><i class="fas fa-history"></i> Last Online: ${status.last_online}</p>` : ''}
-                            </div>
-                        `;
-                        container.appendChild(card);
+                        `);
+                    }
+
+                    // Only update if content has changed
+                    const newContent = newHtml.join('');
+                    if (container.innerHTML !== newContent) {
+                        container.innerHTML = newContent;
+                        initSortable();
                     }
                 });
         }
@@ -373,27 +446,31 @@ HTML_TEMPLATE = """
         function updateIpList() {
             fetch('/list-ips')
                 .then(response => response.json())
-                .then(ips => {
+                .then(data => {
                     const ipList = document.getElementById('ip-list');
                     ipList.innerHTML = '<h3 class="sidebar-title">Monitored IPs</h3>';
                     
-                    ips.forEach(ip => {
+                    for (const [ip, name] of Object.entries(data)) {
                         const ipItem = document.createElement('div');
                         ipItem.className = 'ip-item';
                         ipItem.innerHTML = `
-                            <span>${ip}</span>
+                            <div>
+                                <div>${ip}</div>
+                                <div class="ip-name">${name}</div>
+                            </div>
                             <button class="btn btn-danger" onclick="removeIp('${ip}')">
                                 <i class="fas fa-trash"></i>
                             </button>
                         `;
                         ipList.appendChild(ipItem);
-                    });
+                    }
                 });
         }
 
         function addIp() {
             const password = document.getElementById('password').value;
             const newIp = document.getElementById('newIp').value;
+            const newName = document.getElementById('newName').value;
             
             fetch('/add-ip', {
                 method: 'POST',
@@ -402,7 +479,8 @@ HTML_TEMPLATE = """
                 },
                 body: JSON.stringify({
                     password: password,
-                    ip: newIp
+                    ip: newIp,
+                    name: newName
                 })
             })
             .then(response => response.json())
@@ -410,6 +488,7 @@ HTML_TEMPLATE = """
                 if (data.success) {
                     showMessage('success', 'IP successfully added');
                     document.getElementById('newIp').value = '';
+                    document.getElementById('newName').value = '';
                     updateIpList();
                 } else {
                     showMessage('error', data.message);
@@ -445,22 +524,11 @@ HTML_TEMPLATE = """
         setInterval(updateStatus, 5000);
         updateStatus();
         updateIpList();
+        initSortable();
     </script>
 </body>
 </html>
 """
-
-
-def validate_ip(ip):
-    """Validate IP address format"""
-    parts = ip.split('.')
-    if len(parts) != 4:
-        return False
-    try:
-        return all(0 <= int(part) <= 255 for part in parts)
-    except ValueError:
-        return False
-
 
 def check_ip(ip):
     """Fungsi untuk mengecek status IP"""
@@ -494,53 +562,52 @@ def check_ip(ip):
             'last_online': current_status.get('last_online') or current_status.get('last_check')
         }
 
-
+# Update monitor_ips function
 def monitor_ips():
     """Fungsi background untuk monitoring IP"""
     while True:
-        for ip in ip_addresses:
+        for ip in list(ip_addresses.keys()):  # Convert to list to avoid runtime modification issues
             status = check_ip(ip)
             ip_status[ip] = status
         time.sleep(5)
-
 
 @app.route('/')
 def home():
     return render_template_string(HTML_TEMPLATE)
 
-
 @app.route('/status')
 def status():
-    return jsonify(ip_status)
-
+    return jsonify({
+        'status': ip_status,
+        'names': ip_addresses
+    })
 
 @app.route('/list-ips')
 def list_ips():
     return jsonify(ip_addresses)
-
 
 @app.route('/add-ip', methods=['POST'])
 def add_ip():
     data = request.get_json()
     password = data.get('password')
     ip = data.get('ip')
+    name = data.get('name')
 
-    if not password or not ip:
-        return jsonify({'success': False, 'message': 'Password dan IP diperlukan'})
+    if not password or not ip or not name:
+        return jsonify({'success': False, 'message': 'Password, IP, and name are required'})
 
     if hashlib.sha256(password.encode()).hexdigest() != PASSWORD_HASH:
-        return jsonify({'success': False, 'message': 'Password salah'})
+        return jsonify({'success': False, 'message': 'Invalid password'})
 
     if not validate_ip(ip):
-        return jsonify({'success': False, 'message': 'Format IP tidak valid'})
+        return jsonify({'success': False, 'message': 'Invalid IP format'})
 
     if ip in ip_addresses:
-        return jsonify({'success': False, 'message': 'IP sudah ada dalam daftar'})
+        return jsonify({'success': False, 'message': 'IP already exists'})
 
-    ip_addresses.append(ip)
+    ip_addresses[ip] = name
     save_ip_addresses(ip_addresses)
     return jsonify({'success': True})
-
 
 @app.route('/remove-ip', methods=['POST'])
 def remove_ip():
@@ -549,25 +616,21 @@ def remove_ip():
     ip = data.get('ip')
 
     if not password or not ip:
-        return jsonify({'success': False, 'message': 'Password dan IP diperlukan'})
+        return jsonify({'success': False, 'message': 'Password and IP required'})
 
     if hashlib.sha256(password.encode()).hexdigest() != PASSWORD_HASH:
-        return jsonify({'success': False, 'message': 'Password salah'})
+        return jsonify({'success': False, 'message': 'Invalid password'})
 
     if ip not in ip_addresses:
-        return jsonify({'success': False, 'message': 'IP tidak ditemukan'})
+        return jsonify({'success': False, 'message': 'IP not found'})
 
-    ip_addresses.remove(ip)
+    del ip_addresses[ip]
     if ip in ip_status:
         del ip_status[ip]
     save_ip_addresses(ip_addresses)
     return jsonify({'success': True})
 
-
 if __name__ == '__main__':
-    # Memulai thread monitoring
     monitor_thread = threading.Thread(target=monitor_ips, daemon=True)
     monitor_thread.start()
-
-    # Menjalankan aplikasi Flask
-    app.run(debug=True, host='0.0.0.0', port=4010)
+    app.run(debug=True, host='0.0.0.0', port=3000)
