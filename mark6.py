@@ -9,11 +9,12 @@ import os
 
 app = Flask(__name__)
 
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "Jigsaw_515")
 PASSWORD_HASH = hashlib.sha256(ADMIN_PASSWORD.encode()).hexdigest()
 
 IP_FILE = "monitored_ips.json"
 ip_status = {}
+
 
 def load_ip_addresses():
     """Load IP addresses and names from file"""
@@ -34,6 +35,7 @@ def load_ip_addresses():
         "1.1.1.1": "Cloudflare DNS"
     }
 
+
 def save_ip_addresses(ips):
     """Save IP addresses and names to file"""
     try:
@@ -41,6 +43,7 @@ def save_ip_addresses(ips):
             json.dump(ips, f)
     except Exception as e:
         print(f"Error saving IP addresses: {e}")
+
 
 def validate_ip(ip):
     """Validasi format IP"""
@@ -50,6 +53,7 @@ def validate_ip(ip):
         return True
     except ValueError:
         return False
+
 
 # Load initial IP addresses
 ip_addresses = load_ip_addresses()
@@ -656,6 +660,7 @@ HTML_TEMPLATE = """
 </html>
 """
 
+
 def check_ip(ip):
     """Fungsi untuk mengecek status IP"""
     try:
@@ -689,17 +694,22 @@ def check_ip(ip):
         }
 
 # Update monitor_ips function
+
+
 def monitor_ips():
     """Fungsi background untuk monitoring IP"""
     while True:
-        for ip in list(ip_addresses.keys()):  # Convert to list to avoid runtime modification issues
+        # Convert to list to avoid runtime modification issues
+        for ip in list(ip_addresses.keys()):
             status = check_ip(ip)
             ip_status[ip] = status
         time.sleep(5)
 
+
 @app.route('/')
 def home():
     return render_template_string(HTML_TEMPLATE)
+
 
 @app.route('/status')
 def status():
@@ -708,9 +718,11 @@ def status():
         'names': ip_addresses
     })
 
+
 @app.route('/list-ips')
 def list_ips():
     return jsonify(ip_addresses)
+
 
 @app.route('/add-ip', methods=['POST'])
 def add_ip():
@@ -735,6 +747,7 @@ def add_ip():
     save_ip_addresses(ip_addresses)
     return jsonify({'success': True})
 
+
 @app.route('/remove-ip', methods=['POST'])
 def remove_ip():
     data = request.get_json()
@@ -755,6 +768,7 @@ def remove_ip():
         del ip_status[ip]
     save_ip_addresses(ip_addresses)
     return jsonify({'success': True})
+
 
 if __name__ == '__main__':
     monitor_thread = threading.Thread(target=monitor_ips, daemon=True)
