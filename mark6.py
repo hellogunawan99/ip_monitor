@@ -9,7 +9,7 @@ import os
 
 app = Flask(__name__)
 
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "Jigsaw_515")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "pass")
 PASSWORD_HASH = hashlib.sha256(ADMIN_PASSWORD.encode()).hexdigest()
 
 IP_FILE = "monitored_ips.json"
@@ -773,4 +773,4 @@ def remove_ip():
 if __name__ == '__main__':
     monitor_thread = threading.Thread(target=monitor_ips, daemon=True)
     monitor_thread.start()
-    app.run(debug=True, host='0.0.0.0', port=4010)
+    app.run(debug=True, host='0.0.0.0', port=5000)

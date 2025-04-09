@@ -1,0 +1,11 @@
+version: '3.8'
+
+services:
+  flask_app:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      ADMIN_PASSWORD: "pass"  # Change this to your desired password for secure operations
+    volumes:
+      - ./monitored_ips.json:/app/monitored_ips.json  # Persist monitored IPs
